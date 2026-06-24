@@ -161,6 +161,6 @@ for i, var in enumerate(selected_vars):
 
 
 # Optional: Show raw data
-#with st.expander("View filtered data"):
-#    st.dataframe(filtered_df[selected_vars], use_container_width=True)
+with st.expander("View filtered data"):
+    st.dataframe(filtered_df[selected_vars], use_container_width=True)
 
