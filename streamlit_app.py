@@ -2,150 +2,166 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
+from datetime import datetime
+import plotly.express as px 
 
 # Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title="Flux Time Series Dashboard",
+    page_icon="📈",
+    layout="wide"
 )
 
 # -----------------------------------------------------------------------------
 # Declare some useful functions.
 
 @st.cache_data
-def get_gdp_data():
+def get_flux_data(date_col='date', time_col='time', sep=','):
     """Grab GDP data from a CSV file.
 
     This uses caching to avoid having to read the file every time. If we were
     reading from an HTTP endpoint instead of a file, it's a good idea to set
     a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
     """
+    """
+    Load data from CSV, Excel, or TSV.
+    For Excel, use sep=None and let pandas detect.
+    """
 
     # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    DATA_FILENAME = Path(__file__).parent/'data/2026-06-10_smart3-01508_EP-Summary.txt'
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
+    if DATA_FILENAME.name.endswith('.csv'):
+        df = pd.read_csv(DATA_FILENAME, sep=sep)
+    elif DATA_FILENAME.name.endswith(('.xls', '.xlsx')):
+        df = pd.read_excel(DATA_FILENAME)
+    else:
+        # fallback to tab-separated
+        df = pd.read_csv(DATA_FILENAME, sep='\t')
 
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
+    """
+    Combine date and time columns into a datetime index.
+    """
+    df = df.drop([0])
+    df = df.drop(['DATAH','filename','DOY','daytime','file_records','used_records'], axis=1)
 
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
+    # Ensure both columns are strings
+    df[date_col] = df[date_col].astype(str)
+    df[time_col] = df[time_col].astype(str)
 
-    return gdp_df
+    # Create a combined datetime column
+    df['datetime'] = df[date_col] + ' ' + df[time_col]
+    df['datetime'] = pd.to_datetime(df['datetime'], format='%Y-%m-%d %H:%M:%S')
+    # Set as index and sort
+    df = df.set_index('datetime').sort_index()
 
-gdp_df = get_gdp_data()
+    # Drop the original date and time columns (they are now redundant)
+    df = df.drop(columns=[date_col, time_col], errors='ignore')
+
+    # Convert all remaining columns to float, coercing errors to NaN
+    for col in df.columns:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    return df
+
+
+flux_df = get_flux_data()
 
 # -----------------------------------------------------------------------------
 # Draw the actual page
 
 # Set the title that appears at the top of the page.
 '''
-# :earth_americas: GDP dashboard
+# :earth_americas: Eddy Covariance dashboard
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
+By LIIS.LPO.
 '''
 
 # Add some spacing
 ''
 ''
+st.markdown("### Choose Variables to Visualise")
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
+numeric_cols = flux_df.select_dtypes(include=['number']).columns.tolist()
+selected_vars = st.multiselect(
+    "Select one or more numeric columns to plot",
+    numeric_cols,
+    default=numeric_cols[:2] if len(numeric_cols) >= 2 else numeric_cols
 )
 
-''
-''
+if not selected_vars:
+    st.info("Select at least one variable to plot.")
+    st.stop()
 
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
+# Time range filter
+st.markdown("### Filter by Time Range")
 
-st.header(f'GDP in {to_year}', divider='gray')
+min_date = flux_df.index.min().to_pydatetime()
+max_date = flux_df.index.max().to_pydatetime()
 
-''
+# Use datetime slider (Streamlit supports datetime objects)
+date_range = st.slider(
+    "Select time range",
+    min_value=min_date,
+    max_value=max_date,
+    value=(min_date, max_date),
+    format="YYYY-MM-DD HH:mm:ss"
+)
 
-cols = st.columns(4)
+filtered_df = flux_df.loc[date_range[0]:date_range[1]]
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
+if filtered_df.empty:
+    st.warning("No data in the selected time range.")
+    st.stop()
 
+
+# Plot with Plotly
+st.markdown("### Time Series Plot")
+fig = px.line(
+    filtered_df,
+    x=filtered_df.index,
+    y=selected_vars,
+    title="Values over Time",
+    labels={"value": "Value", "variable": "Variable", "index": "Date & Time"},
+    color_discrete_sequence=px.colors.qualitative.Plotly
+)
+
+fig.update_layout(
+    xaxis_title="Date & Time",
+    yaxis_title="Values",
+    hovermode="x unified",  # shows all values at the same x
+    legend_title="Variables",
+    template="plotly_white"
+)
+
+st.plotly_chart(fig, use_container_width=True)
+
+# Metrics: show latest value for each selected variable
+st.markdown("### Latest Values")
+
+# Get the last available row for each variable (if multiple rows at same time, take mean)
+latest = filtered_df[selected_vars].iloc[-1]  # last row in filtered range
+
+cols = st.columns(min(len(selected_vars), 4))  # max 4 per row
+for i, var in enumerate(selected_vars):
+    col = cols[i % 4]
     with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
+        value = latest[var]
+        if math.isnan(value):
+            st.metric(label=var, value="N/A")
         else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+            # Format nicely
+            if abs(value) >= 1e6:
+                display = f"{value/1e6:.1f}M"
+            elif abs(value) >= 1e3:
+                display = f"{value/1e3:.1f}K"
+            else:
+                display = f"{value:.2f}"
+            st.metric(label=var, value=display)
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+
+# Optional: Show raw data
+#with st.expander("View filtered data"):
+#    st.dataframe(filtered_df[selected_vars], use_container_width=True)
+
