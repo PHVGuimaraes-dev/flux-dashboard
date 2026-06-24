@@ -17,16 +17,15 @@ st.set_page_config(
 
 @st.cache_data
 def get_flux_data(date_col='date', time_col='time', sep=','):
-    """Grab GDP data from a CSV file.
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-    """
-    Load data from CSV, Excel, or TSV.
-    For Excel, use sep=None and let pandas detect.
-    """
+    #This uses caching to avoid having to read the file every time. If we were
+    #reading from an HTTP endpoint instead of a file, it's a good idea to set
+    #a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
+    
+    
+    #Load data from CSV, Excel, TSV or TXT.
+    #For Excel, use sep=None and let pandas detect.
+    
 
     # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
     DATA_FILENAME = Path(__file__).parent/'data/2026-06-10_smart3-01508_EP-Summary.txt'
@@ -39,9 +38,9 @@ def get_flux_data(date_col='date', time_col='time', sep=','):
         # fallback to tab-separated
         df = pd.read_csv(DATA_FILENAME, sep='\t')
 
-    """
-    Combine date and time columns into a datetime index.
-    """
+    
+    # Combine date and time columns into a datetime index.
+    
     df = df.drop([0])
     df = df.drop(['DATAH','filename','DOY','daytime','file_records','used_records'], axis=1)
 
